@@ -27,11 +27,13 @@ contract OpenInvariantsTest is StdInvariant, Test {
     address weth;
     address wbtc;
 
+    Handler public handler;
+
     function setUp() external {
-        deployer = new DeployDSC();
+        DeployDSC deployer = new DeployDSC();
         (dsc, dsce, config) = deployer.run();
         (, , weth, wbtc) = config.activeNetworkConfig();
-        Handler handler = new Handler(dsce, dsc);
+        handler = new Handler(dsce, dsc);
         targetContract(address(handler));
     }
 
@@ -55,6 +57,6 @@ contract OpenInvariantsTest is StdInvariant, Test {
 
     function invariant_gettersShouldNotRevert() public view {
         // all getters here
-        dsc.getCollateralTokens();
+        dsce.getCollateralTokens();
     }
 }
