@@ -38,7 +38,8 @@ contract DSCEngineTest is Test {
         (dsc, dsce, helperConfig) = deployer.run();
         (ethUsdPriceFeed, , weth, , ) = helperConfig.activeNetworkConfig();
 
-        ERC20Mock(weth).mint(USER, STARTING_ERC20_BALANCE);
+        ERC20Mock(weth).mint(user, STARTING_USER_BALANCE);
+        ERC20Mock(wbtc).mint(user, STARTING_USER_BALANCE);
     }
 
     ///////////////////////
@@ -54,7 +55,9 @@ contract DSCEngineTest is Test {
         priceFeedAddresses.push(ethUsdPriceFeed);
 
         vm.expectRevert(
-            DSCEngine.DSCEngine__TokenAndPriceLengthFeedMismatch.selector
+            DSCEngine
+                .DSCEngine__TokenAddressesAndPriceFeedAddressesAmountsDontMatch
+                .selector
         );
         new DSCEngine(tokenAddresses, priceFeedAddresses, address(dsc));
     }
@@ -76,7 +79,7 @@ contract DSCEngineTest is Test {
     ///////////////////////////
 
     function testRevertsIfCollateralZero() public {
-        vm.startPrank(USER);
+        vm.startPrank(user);
         ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
 
         vm.expectRevert(DSCEngine.DSCEngine__NeedsMoreThanZero.selector);
@@ -85,8 +88,13 @@ contract DSCEngineTest is Test {
     }
 
     function testRevertsWithUnapprovedCollateral() public {
-        ERC20Mock ranToken = new ERC20("RAN", "RAN", USER, AMOUNT_COLLATERAL);
-        vm.startPrank(USER);
+        ERC20Mock ranToken = new ERC20Mock(
+            "RAN",
+            "RAN",
+            user,
+            AMOUNT_COLLATERAL
+        );
+        vm.startPrank(user);
         vm.expectRevert(DSCEngine.DSCEngine__NotAllowedToken.selector);
         dsce.depositCollateral(address(ranToken), AMOUNT_COLLATERAL);
     }

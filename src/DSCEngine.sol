@@ -55,8 +55,8 @@ contract DSCEngine is ReentrancyGuard, Ownable {
     ///////////////////
     // Errors       //
     /////////////////
+    error DSCEngine__TokenAddressesAndPriceFeedAddressesAmountsDontMatch();
     error DSCEngine__NeedsMoreThanZero();
-    error DSCEngine__TokenAddressesAndPriceFeedAddressesMustBeSameLength();
     error DSCEngine__NotAllowedToken();
     error DSCEngine__TransferFailed();
     error DSCEngine__BreaksHealthFactor(uint256 healthFactor);
@@ -74,7 +74,7 @@ contract DSCEngine is ReentrancyGuard, Ownable {
     uint256 private constant ADDITIONAL_FEED_PRECISION = 1e10;
     uint256 private constant FEED_PRECISION = 1e8;
 
-    mapping(address token => address priceFeed) private s_priceFeed;
+    mapping(address token => address priceFeed) private s_priceFeeds;
     mapping(address user => mapping(address token => uint256 amount))
         private s_collateralDeposited;
     mapping(address usert => uint256 amountDscMinted) private s_DSCMinted;
@@ -108,7 +108,7 @@ contract DSCEngine is ReentrancyGuard, Ownable {
     }
 
     modifier isAllowedToken(address tokenAddress) {
-        if (s_priceFeed[tokenAddress] == address(0)) {
+        if (s_priceFeeds[tokenAddress] == address(0)) {
             revert DSCEngine__NotAllowedToken();
         }
         _;
@@ -123,12 +123,12 @@ contract DSCEngine is ReentrancyGuard, Ownable {
         address dscAddress
     ) {
         if (tokenAddresses.length != priceFeedAddress.length) {
-            revert DSCEngine__TokenAddressesAndPriceFeedAddressesMustBeSameLength();
+            revert DSCEngine__TokenAddressesAndPriceFeedAddressesAmountsDontMatch();
         }
 
         // for example ETH/USD, BTC/USD, etc
         for (uint256 i = 0; i < tokenAddresses.length; i++) {
-            s_priceFeed[tokenAddresses[i]] = priceFeedAddress[i];
+            s_priceFeeds[tokenAddresses[i]] = priceFeedAddress[i];
             s_collateralTokens.push(tokenAddresses[i]);
         }
         i_dsc = DecentralizedStableCoin(dscAddress);
@@ -169,7 +169,7 @@ contract DSCEngine is ReentrancyGuard, Ownable {
     {
         // s_collateralDeposited[msg.sender][
         //     tokenCollateralAdd
-        // uint256 priceFeed = s_priceFeed[token];
+        // uint256 priceFeed = s_priceFeeds[token];
         // uint256 collateralValue = amountCollateral * priceFeed;ress
         // ] += amountCollateral;
         s_collateralDeposited[msg.sender][
@@ -286,7 +286,7 @@ contract DSCEngine is ReentrancyGuard, Ownable {
 
         // 0.05 ETH * 0.1 = 0.005. Getting 0.055
         uint256 bonusCollateral = (tokenAmountFromDebtCovered *
-            LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
+            LIQUIDATION_BONUS) / PRECISION;
         uint256 totalCollateralToRedeem = tokenAmountFromDebtCovered +
             bonusCollateral;
         _redeemCollateral(
@@ -334,6 +334,30 @@ contract DSCEngine is ReentrancyGuard, Ownable {
         i_dsc.burn(amountDscToBurn);
     }
 
+    /*
+    *  Returns how close to liquidation a user is
+    * If a user goes below 1, then they can get liquidated
+    @notice https://docs.aave.com/risk/asset-risk/risk-parameters#health-factor
+    */
+    function _healthFactor(address user) private view returns (uint256) {
+        (
+            uint256 totalDscMinted,
+            uint256 collateralValueInUsd
+        ) = _getAccountInformation(user);
+        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
+    }
+
+    function _calculateHealthFactor(
+        uint256 totalDscMinted,
+        uint256 collateralValueInUsd
+    ) internal pure returns (uint256) {
+        // set health factor if debt is 0
+        if (totalDscMinted == 0) return type(uint256).max;
+        uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
+            LIQUIDATION_THRESHOLD) / 100;
+        return (collateralAdjustedForThreshold * 1e18) / totalDscMinted;
+    }
+
     function _redeemCollateral(
         address from,
         address to,
@@ -358,37 +382,6 @@ contract DSCEngine is ReentrancyGuard, Ownable {
         }
     }
 
-    function _getAccountInformation(
-        address user
-    )
-        private
-        view
-        returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
-    {
-        totalDscMinted = s_DSCMinted[user];
-        collateralValueInUsd = getAccountCollateralValue(user);
-    }
-
-    /*
-    *  Returns how close to liquidation a user is
-    * If a user goes below 1, then they can get liquidated
-    @notice https://docs.aave.com/risk/asset-risk/risk-parameters#health-factor
-    */
-    function _healthFactor(address user) internal view returns (uint256) {
-        // total DSC minted
-        // total collateral value
-        (
-            uint256 totalDscMinted,
-            uint256 collateralValueInUsd
-        ) = _getAccountInformation(user);
-        uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
-            LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
-
-        // $1000 ETH / 100 DSC
-        // 1000 * 50 = 50,000 / 100 = (500 / 100) > 1
-        return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
-    }
-
     function _revertIfHealthFactorBelowIsBroken(address user) internal view {
         // check health factor (do they have enough collateral)
         // Revert if they don't have enough collateral
@@ -407,7 +400,7 @@ contract DSCEngine is ReentrancyGuard, Ownable {
         uint256 usdAmountInWei
     ) public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
-            s_priceFeed[token]
+            s_priceFeeds[token]
         );
         (, int256 price, , , ) = priceFeed.latestRoundData();
         return
@@ -432,7 +425,7 @@ contract DSCEngine is ReentrancyGuard, Ownable {
         uint256 amount
     ) public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
-            s_priceFeed[token]
+            s_priceFeeds[token]
         );
         (, int256 price, , , ) = priceFeed.latestRoundData();
         // 1ETH = 1000 USD
@@ -450,5 +443,38 @@ contract DSCEngine is ReentrancyGuard, Ownable {
         returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
     {
         (totalDscMinted, collateralValueInUsd) = _getAccountInformation(user);
+    }
+
+    function getHealthFactor(address user) external view returns (uint256) {
+        return _healthFactor(user);
+    }
+
+    function getMinHealthFactor() external pure returns (uint256) {
+        return MIN_HEALTH_FACTOR;
+    }
+
+    function getLiquidationTreshold() external pure returns (uint256) {
+        return LIQUIDATION_THRESHOLD;
+    }
+
+    function getCollateralBalanceOfUser(
+        address user,
+        address token
+    ) external view returns (uint256) {
+        return s_collateralDeposited[user][token];
+    }
+
+    function getCollateralTokens() external view returns (address[] memory) {
+        return s_collateralTokens;
+    }
+
+    function getCollateralTokenPriceFeed(
+        address token
+    ) external view returns (address) {
+        return s_priceFeeds[token];
+    }
+
+    function getPrecision() external pure returns (uint256) {
+        return PRECISION;
     }
 }

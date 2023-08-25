@@ -1,5 +1,5 @@
-1. (Relative Stability) Anochred or Pegged -> $1.00
-2. Sttability Mechanism (Minting):: Algotithmic (Decentralized)
+1. (Relative Stability) Anchored or Pegged -> $1.00
+2. Stability Mechanism (Minting):: Algorithmic (Decentralized)
 
 - People can only mint the stablecoin with enough collateral (coded)
 
@@ -7,3 +7,6 @@
 
 - wETH
 - wBTC
+
+4. some unit test
+5. some fuzz test
